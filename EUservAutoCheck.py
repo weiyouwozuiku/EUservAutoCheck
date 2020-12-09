@@ -110,9 +110,13 @@ def check(sess_id, session):
         logToFile(filePath, "ALL Work Done! Enjoy")
 
 
-def logToFile(filePath, word) -> bool:
+def logToFile(filePath, *words) -> bool:
     with open(filePath, 'a+', encoding="utf8")as f:
-        print(word, file=f)
+        for word in words:
+            print(word, file=f, end="")
+        print(file=f)
+        return True
+    return False
 
 
 if __name__ == "__main__":
