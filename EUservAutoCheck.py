@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import requests
@@ -7,38 +8,46 @@ from bs4 import BeautifulSoup
 # 账号信息
 USERNAME = ""
 PASSWORD = ""
+TOKEN = ""
 # 代理设置
 PROXIES = {
-    "http": "http://192.168.50.131:8888",
-    "https": "http://192.168.50.131:8888"
+    "http": "http://127.0.0.1:10808",
+    "https": "http://127.0.0.1:10808"
 }
 
 
-def login(username, password) -> (str, requests.session):
+def login(username: str, password: str) -> (str, requests.session):
     headers = {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                       "Chrome/83.0.4103.116 Safari/537.36",
         "origin": "https://www.euserv.com"
     }
+    url = "https://support.euserv.com/index.iphp"
+    session = requests.Session()
+
+    sess = session.get(url, headers=headers)
+    sess_id = re.findall("PHPSESSID=(\\w{10,100});", str(sess.headers))[0]
+    # 访问png
+    png_url = "https://support.euserv.com/pic/logo_small.png"
+    session.get(png_url, headers=headers)
+
     login_data = {
         "email": username,
         "password": password,
         "form_selected_language": "en",
         "Submit": "Login",
-        "subaction": "login"
+        "subaction": "login",
+        "sess_id": sess_id
     }
-    url = "https://support.euserv.com/index.iphp"
-    session = requests.Session()
     f = session.post(url, headers=headers, data=login_data)
     f.raise_for_status()
+
     if f.text.find('Hello') == -1:
         return '-1', session
-    # print(f.request.url)
-    sess_id = f.request.url[f.request.url.index('=') + 1:len(f.request.url)]
     return sess_id, session
 
 
-def get_servers(sess_id, session) -> {}:
+def get_servers(sess_id: str, session: requests.session) -> {}:
     d = {}
     url = "https://support.euserv.com/index.iphp?sess_id=" + sess_id
     headers = {
@@ -59,7 +68,7 @@ def get_servers(sess_id, session) -> {}:
     return d
 
 
-def renew(sess_id, session, password, order_id) -> bool:
+def renew(sess_id: str, session: requests.session, password: str, order_id: str) -> bool:
     url = "https://support.euserv.com/index.iphp"
     headers = {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -98,7 +107,7 @@ def renew(sess_id, session, password, order_id) -> bool:
     return True
 
 
-def check(sess_id, session):
+def check(sess_id: str, session: requests.session):
     logToFile(filePath, "Checking.......")
     d = get_servers(sess_id, session)
     flag = True
@@ -106,9 +115,14 @@ def check(sess_id, session):
         if val:
             flag = False
             logToFile(filePath, "ServerID: %s Renew Failed!" % key)
+            TOKEN and notify_user(token=TOKEN, msg="ServerID: %s Renew Failed!" % key)
     if flag:
         logToFile(filePath, "ALL Work Done! Enjoy")
 
+
+def notify_user(token: str, msg: str):
+    rs = requests.post(url="https://sre24.com/api/v1/push", json=dict(token=token, msg=msg)).json()
+    assert int(rs["code"] / 100) == 2, rs
 
 def logToFile(filePath, *words) -> bool:
     with open(filePath, 'a+', encoding="utf8")as f:
@@ -125,11 +139,13 @@ if __name__ == "__main__":
     logToFile(filePath, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
     if not USERNAME or not PASSWORD:
         logToFile(filePath, "你没有添加任何账户")
+        TOKEN and notify_user(token=TOKEN, msg="你没有添加任何账户")
         exit(1)
-    user_list = USERNAME.split(',')
-    passwd_list = PASSWORD.split(',')
+    user_list = USERNAME.strip().split()
+    passwd_list = PASSWORD.strip().split()
     if len(user_list) != len(passwd_list):
         logToFile(filePath, "The number of usernames and passwords do not match!")
+        TOKEN and notify_user(token=TOKEN, msg="The number of usernames and passwords do not match!")
         exit(1)
     for i in range(len(user_list)):
         logToFile(filePath, '*' * 30)
@@ -137,20 +153,20 @@ if __name__ == "__main__":
         sessid, s = login(user_list[i], passwd_list[i])
         if sessid == '-1':
             logToFile(filePath, "第 %d 个账号登陆失败，请检查登录信息" % (i + 1))
+            TOKEN and notify_user(token=TOKEN, msg="第 %d 个账号登陆失败，请检查登录信息" % (i + 1))
             continue
         SERVERS = get_servers(sessid, s)
-        logToFile(filePath, "检测到第 {} 个账号有 {} 台VPS，正在尝试续期".format(
-            i + 1, len(SERVERS)))
+        logToFile(filePath, "检测到第 {} 个账号有 {} 台VPS，正在尝试续期".format(i + 1, len(SERVERS)))
         for k, v in SERVERS.items():
             if v:
                 if not renew(sessid, s, passwd_list[i], k):
                     logToFile(filePath, "ServerID: %s Renew Error!" % k)
+                    TOKEN and notify_user(token=TOKEN, msg="ServerID: %s Renew Error!" % k)
                 else:
-                    logToFile(
-                        filePath, "ServerID: %s has been successfully renewed!" % k)
+                    logToFile(filePath, "ServerID: %s has been successfully renewed!" % k)
+                    TOKEN and notify_user(token=TOKEN, msg="ServerID: %s has been successfully renewed!" % k)
             else:
-                logToFile(
-                    filePath, "ServerID: %s does not need to be renewed" % k)
+                logToFile(filePath, "ServerID: %s does not need to be renewed" % k)
         time.sleep(15)
         check(sessid, s)
         time.sleep(5)
